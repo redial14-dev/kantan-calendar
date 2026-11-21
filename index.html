@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>かんたんカレンダー</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #fff; --ink: #2b2b2b; --sub: #777; --line: #e3dfd6;
+    --sun: #d9434e; --sat: #2f6fd1; --accent: #2f8a6b; --sel: #fff3c4; --today: #2f8a6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Kaku Gothic ProN", "BIZ UDPGothic", "Meiryo", sans-serif; font-size: 16px; }
+  button { font: inherit; cursor: pointer; }
+  .app { max-width: 1400px; margin: 0 auto; padding: 12px; display: grid; gap: 12px;
+    grid-template-columns: minmax(0, 1fr) 340px; grid-template-areas: "head head" "input input" "cal side"; }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "input" "cal" "side"; padding: 8px; gap: 8px; }
+  }
+  /* ヘッダー */
+  header { grid-area: head; display: flex; align-items: center; gap: 8px; }
+  header h1 { font-size: 28px; margin: 0 8px; min-width: 7em; text-align: center; }
+  .nav { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); font-size: 22px; }
+  .pill { height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid var(--line); background: var(--card); }
+  header .spacer { flex: 1; }
+  /* 入力 */
+  .inputbox { grid-area: input; background: var(--card); border-radius: 14px; padding: 12px; box-shadow: 0 1px 3px #0001; }
+  .inputrow { display: flex; gap: 8px; }
+  #quick { flex: 1; font-size: 20px; padding: 12px 14px; border: 2px solid var(--line); border-radius: 10px; min-width: 0; }
+  #quick:focus { outline: none; border-color: var(--accent); }
+  #quickAdd { font-size: 18px; padding: 0 22px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: bold; }
+  #preview { min-height: 1.6em; margin: 8px 4px 2px; color: var(--accent); font-size: 17px; }
+  #preview.empty { color: var(--sub); font-size: 15px; }
+  .tpls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+  .tpls .label { color: var(--sub); font-size: 14px; }
+  .tpl { padding: 8px 14px; border-radius: 20px; border: 2px solid var(--c, #ccc); background: #fff; font-size: 16px; }
+  .tpl:active { transform: scale(.96); }
+  /* カレンダー */
+  .cal { grid-area: cal; background: var(--card); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px #0001; touch-action: pan-y; }
+  .week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .dow div { text-align: center; padding: 8px 0; font-weight: bold; border-bottom: 1px solid var(--line); }
+  .dow div:first-child { color: var(--sun); } .dow div:last-child { color: var(--sat); }
+  .cell { min-height: 118px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; cursor: pointer; overflow: hidden; position: relative; }
+  .cell:nth-child(7n) { border-right: 0; }
+  .cell.other { background: #faf9f6; } .cell.other > * { opacity: .45; }
+  .cell.sel { background: var(--sel); }
+  .cell .top { display: flex; align-items: baseline; justify-content: space-between; gap: 2px; }
+  .cell .num { font-size: 18px; font-weight: bold; width: 30px; height: 30px; line-height: 30px; text-align: center; border-radius: 50%; }
+  .cell.today .num { background: var(--today); color: #fff; }
+  .cell.sun .num, .cell.hol .num { color: var(--sun); } .cell.sat .num { color: var(--sat); }
+  .cell.today .num { color: #fff; }
+  .cell .roku { font-size: 12px; color: var(--sub); }
+  .cell .roku.taian { color: var(--sun); font-weight: bold; }
+  .cell .hname { font-size: 12px; color: var(--sun); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .stamps { font-size: 26px; line-height: 1.1; display: flex; flex-wrap: wrap; gap: 2px; }
+  .cell .stamps img { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; }
+  .cell .ev { font-size: 13px; line-height: 1.35; margin-top: 2px; padding: 1px 4px; border-radius: 4px;
+    background: color-mix(in srgb, var(--c) 18%, white); border-left: 4px solid var(--c);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .more { font-size: 12px; color: var(--sub); }
+  .cell.flash { animation: flash 1s; }
+  @keyframes flash { 0% { background: #bfe8d6; } 100% { background: var(--sel); } }
+  @media (max-width: 600px) {
+    header { gap: 4px; }
+    header h1 { font-size: 20px; min-width: 0; margin: 0 2px; }
+    .nav { width: 40px; height: 40px; }
+    .pill { height: 40px; padding: 0 12px; }
+    #settingsBtn .w { display: none; }
+    #quick { font-size: 17px; padding: 10px; }
+    #quickAdd { padding: 0 14px; }
+    .tpls .label { width: 100%; }
+    .cell { min-height: 84px; padding: 2px; }
+    .cell .num { font-size: 15px; width: 24px; height: 24px; line-height: 24px; }
+    .cell .roku { font-size: 10px; }
+    .cell .hname { font-size: 10px; }
+    .cell .stamps { font-size: 20px; } .cell .stamps img { width: 22px; height: 22px; }
+    .cell .ev { font-size: 11px; padding: 0 2px; border-left-width: 3px; }
+    .cell .ev .t { display: none; }
+  }
+  /* 横の日別パネル */
+  .side { grid-area: side; background: var(--card); border-radius: 14px; padding: 14px; box-shadow: 0 1px 3px #0001; align-self: start; }
+  .side h2 { margin: 0 0 4px; font-size: 22px; }
+  .side .meta { color: var(--sub); margin-bottom: 12px; }
+  .side .meta .h { color: var(--sun); font-weight: bold; }
+  .item { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+    border-left: 6px solid var(--c); margin-bottom: 8px; cursor: pointer; }
+  .item:hover { background: #fafafa; }
+  .item .st { font-size: 30px; width: 40px; text-align: center; flex: none; }
+  .item .st img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; }
+  .item .tt { font-size: 18px; font-weight: bold; word-break: break-all; }
+  .item .tm { color: var(--sub); font-size: 15px; }
+  .item .memo { color: var(--sub); font-size: 14px; white-space: pre-wrap; }
+  .item .loc { display: inline-block; margin-top: 4px; font-size: 15px; color: var(--sat); background: #eef3fc; border-radius: 8px; padding: 3px 8px; border: 0; text-align: left; }
+  .itemwrap { margin-bottom: 8px; }
+  .itemwrap .item { margin-bottom: 0; }
+  .mapbox { border: 1px solid var(--line); border-top: 0; border-radius: 0 0 10px 10px; overflow: hidden; }
+  .mapbox iframe, #fMap iframe { width: 100%; height: 220px; border: 0; display: block; }
+  .mapbox a, #fMap a { display: block; padding: 8px 10px; font-size: 15px; color: var(--sat); text-decoration: none; }
+  .locrow { display: flex; gap: 8px; }
+  .locrow input { flex: 1; }
+  .locrow button { flex: none; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 15px; }
+  #fMap { border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+  #fMap:empty { display: none; }
+  .cell .ev .pin { font-size: 10px; }
+  .none { color: var(--sub); padding: 16px 0; text-align: center; }
+  .addbtn { width: 100%; padding: 14px; font-size: 18px; border: 2px dashed var(--accent); color: var(--accent); background: #fff; border-radius: 12px; font-weight: bold; }
+  /* ダイアログ */
+  dialog { border: 0; border-radius: 16px; padding: 0; width: min(560px, 96vw); max-height: 92vh; box-shadow: 0 10px 40px #0004; }
+  dialog::backdrop { background: #0005; }
+  .dlg { padding: 18px; display: grid; gap: 14px; }
+  .dlg h3 { margin: 0; font-size: 20px; }
+  .dlg label { display: grid; gap: 4px; font-size: 14px; color: var(--sub); }
+  .dlg input[type=text], .dlg input[type=date], .dlg input[type=time], .dlg textarea, .dlg select {
+    font: inherit; font-size: 18px; padding: 10px; border: 2px solid var(--line); border-radius: 10px; color: var(--ink); width: 100%; }
+  .row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 120px; }
+  .check { display: flex !important; align-items: center; gap: 8px; font-size: 17px !important; color: var(--ink) !important; flex: none !important; min-width: 0 !important; }
+  .check input { width: 22px; height: 22px; }
+  .colors { display: flex; gap: 10px; }
+  .colors button { width: 38px; height: 38px; border-radius: 50%; border: 3px solid #fff; background: var(--c); box-shadow: 0 0 0 1px #ccc; }
+  .colors button.on { box-shadow: 0 0 0 3px var(--ink); }
+  .stampgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 4px; max-height: 210px; overflow-y: auto;
+    border: 2px solid var(--line); border-radius: 10px; padding: 6px; }
+  .stampgrid button { height: 46px; font-size: 26px; border: 2px solid transparent; border-radius: 8px; background: #fff; padding: 0; }
+  .stampgrid button.on { border-color: var(--accent); background: #e6f4ee; }
+  .stampgrid button img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; vertical-align: middle; }
+  .stampgrid .txt { font-size: 13px; color: var(--sub); }
+  .btns { display: flex; gap: 10px; justify-content: flex-end; }
+  .btns button { padding: 12px 22px; font-size: 17px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+  .btns .primary { background: var(--accent); color: #fff; border: 0; font-weight: bold; }
+  .btns .danger { color: var(--sun); margin-right: auto; }
+  .tplrow { display: grid; grid-template-columns: 52px 1fr 92px 92px 38px; gap: 6px; align-items: center; }
+  .tplrow input { font-size: 15px !important; padding: 6px !important; }
+  .tplrow .x { border: 0; background: none; font-size: 20px; color: var(--sun); }
+  .hint { font-size: 13px; color: var(--sub); }
+  /* トースト */
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(120px); background: #333; color: #fff;
+    padding: 12px 18px; border-radius: 12px; display: flex; gap: 14px; align-items: center; transition: transform .25s; z-index: 10; font-size: 16px; }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast button { background: none; border: 0; color: #9fe3c6; font-weight: bold; }
+  .gok { color: var(--accent); font-size: 14px; white-space: nowrap; }
+  .gwarn { border-color: #f08a24 !important; color: #c25e00; font-weight: bold; }
+  .gsect { border: 2px solid #d6eadf; background: #f4faf7; border-radius: 12px; padding: 12px; display: grid; gap: 8px; }
+  .gsect .st { font-size: 15px; }
+  #fNote { font-size: 14px; color: #c25e00; background: #fff4e5; border-radius: 8px; padding: 8px 10px; }
+  #fNote:empty { display: none; }
+  button:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <button class="nav" id="prev" aria-label="前の月">‹</button>
+    <h1 id="title"></h1>
+    <button class="nav" id="next" aria-label="次の月">›</button>
+    <button class="pill" id="todayBtn">今日</button>
+    <div class="spacer"></div>
+    <div id="gbar"></div>
+    <button class="pill" id="settingsBtn">⚙<span class="w"> 設定</span></button>
+  </header>
+
+  <section class="inputbox">
+    <div class="inputrow">
+      <input id="quick" type="text" placeholder="例：明日15時 歯医者" autocomplete="off" enterkeyhint="done">
+      <button id="quickAdd">追加</button>
+    </div>
+    <div id="preview" class="empty"></div>
+    <div class="tpls" id="tpls"></div>
+  </section>
+
+  <section class="cal" id="cal">
+    <div class="week dow"><div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div></div>
+    <div class="week" id="grid"></div>
+  </section>
+
+  <aside class="side" id="side"></aside>
+</div>
+
+<!-- 予定の編集 -->
+<dialog id="editDlg">
+  <form class="dlg" method="dialog" id="editForm">
+    <h3 id="editTitle">予定</h3>
+    <div id="fNote"></div>
+    <label>予定の名前<input type="text" id="fTitle" required></label>
+    <div class="row">
+      <label>日付<input type="date" id="fDate" required></label>
+      <label class="check"><input type="checkbox" id="fAllDay"> 終日</label>
+    </div>
+    <div class="row" id="timeRow">
+      <label>開始<input type="time" id="fStart"></label>
+      <label>終了<input type="time" id="fEnd"></label>
+    </div>
+    <div><div class="hint" style="margin-bottom:6px">色</div><div class="colors" id="fColors"></div></div>
+    <div>
+      <div class="hint" style="margin-bottom:6px">スタンプ（カレンダーに大きく表示されます）</div>
+      <div class="stampgrid" id="fStamps"></div>
+      <input type="file" id="fImage" accept="image/*" hidden>
+    </div>
+    <label>場所（住所やお店の名前）
+      <div class="locrow"><input type="text" id="fLoc" placeholder="例：渋谷駅、〇〇歯科 新宿"><button type="button" id="fMapBtn">🗺 地図で確認</button></div>
+    </label>
+    <div id="fMap"></div>
+    <label>メモ<textarea id="fMemo" rows="2"></textarea></label>
+    <div class="btns">
+      <button type="button" class="danger" id="fDelete">削除</button>
+      <button type="button" id="fCancel">やめる</button>
+      <button type="submit" class="primary" id="fSave">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 設定 -->
+<dialog id="setDlg">
+  <div class="dlg">
+    <h3>設定</h3>
+    <div class="gsect">
+      <div style="font-weight:bold">📅 Googleカレンダー連携</div>
+      <div class="st" id="gStatus"></div>
+      <div class="row">
+        <button type="button" class="pill" id="gConnectBtn" style="flex:none">Googleカレンダーとつなぐ</button>
+        <button type="button" class="pill" id="gDisconnectBtn" style="flex:none">つなぐのをやめる</button>
+      </div>
+      <button type="button" class="pill" id="gMigrate" style="justify-self:start"></button>
+    </div>
+    <label class="check"><input type="checkbox" id="sRoku"> 六曜（大安・仏滅など）を表示する</label>
+    <div>
+      <div style="font-weight:bold;margin-bottom:4px">よく使う予定ボタン</div>
+      <div class="hint" style="margin-bottom:8px">スタンプ / 名前 / 開始 / 終了（時刻を空にすると終日）</div>
+      <div id="sTpls" style="display:grid;gap:6px"></div>
+      <button type="button" class="pill" id="sTplAdd" style="margin-top:8px">＋ ボタンを追加</button>
+    </div>
+    <div>
+      <div style="font-weight:bold;margin-bottom:4px">データの保存</div>
+      <div class="hint" style="margin-bottom:8px">予定はこのパソコンのブラウザ内に保存されています。念のためファイルに書き出しておけます。</div>
+      <div class="row">
+        <button type="button" class="pill" id="sExport">ファイルに書き出す</button>
+        <button type="button" class="pill" id="sImport">ファイルから読み込む</button>
+        <input type="file" id="sImportFile" accept=".json" hidden>
+      </div>
+    </div>
+    <div class="btns"><button type="button" class="primary" id="sClose">閉じる</button></div>
+  </div>
+</dialog>
+
+<div id="toast"><span id="toastMsg"></span><button id="toastUndo">元に戻す</button></div>
+
+<script src="core.js"></script>
+<script src="config.js"></script>
+<script src="gcal.js"></script>
+<script src="https://accounts.google.com/gsi/client" async onload="window.onGisLoad && window.onGisLoad()"></script>
+<script>
+'use strict';
+const C = window.CalCore;
+const $ = s => document.querySelector(s);
+const COLORS = ['#4a7bd8', '#3aa76d', '#f08a24', '#e0505a', '#8e6bd8', '#7a8796'];
+const EMOJIS = ['🦷','🏥','💊','💼','💪','📚','🎂','🎁','🍻','🍽️','☕','🛒','💇','✈️','🚃','🚗','🏠','🗑️','💴','📞','📦','⏰',
+  '🎤','🎬','🎮','📺','🎵','⚽','🏃','💕','👶','🐶','🐱','🌸','🎉','⭐','❤️','⚠️','✅','❗','😊','😴','🍀','☀️','☔','⛄'];
+
+// ---------- 保存データ ----------
+const STORE_KEY = 'kantan-calendar-v1';
+let db = load();
+function load() {
+  try { const d = JSON.parse(localStorage.getItem(STORE_KEY)); if (d && d.events) return d; } catch (e) {}
+  return {
+    events: [], images: [], settings: { rokuyo: true },
+    templates: [
+      { stamp: '💼', title: '仕事', start: '09:00', end: '18:00', color: COLORS[0] },
+      { stamp: '🏥', title: '病院', start: '10:00', end: '', color: COLORS[3] },
+      { stamp: '🛒', title: '買い物', start: '', end: '', color: COLORS[2] },
+      { stamp: '🎂', title: '誕生日', start: '', end: '', color: COLORS[4] },
+    ]
+  };
+}
+let save = function () { localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+if (location.hash.startsWith('#demo')) { // 見た目確認用（保存しない）
+  const k = d => C.keyOf(C.todayEpoch() + d);
+  db.events = [
+    { id: 'a', title: '歯医者', date: k(1), allDay: false, start: '15:00', end: '', color: COLORS[3], stamp: '🦷', memo: '' },
+    { id: 'b', title: '仕事', date: k(0), allDay: false, start: '09:00', end: '18:00', color: COLORS[0], stamp: '💼', memo: '' },
+    { id: 'c', title: '飲み会', date: k(0), allDay: false, start: '19:00', end: '', color: COLORS[2], stamp: '🍻', memo: '駅前の店', location: '渋谷駅' },
+    { id: 'd', title: 'カラオケ', date: k(4), allDay: false, start: '14:00', end: '17:00', color: COLORS[4], stamp: '🎤', memo: '' },
+    { id: 'e', title: '家賃', date: k(5), allDay: true, start: '', end: '', color: COLORS[5], stamp: '💴', memo: '' }];
+  save = () => {};
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// ---------- 状態 ----------
+const t0 = C.fromEpoch(C.todayEpoch());
+let view = { y: t0.y, m: t0.m };
+let selected = C.todayEpoch();
+
+// ---------- Google連携 ----------
+const CFG = window.CAL_CONFIG || {};
+const gMap = new Map();      // GoogleのID → 予定
+const gLoaded = new Map();   // 'y-m' → 読み込んだ時刻
+let gBusy = 0;
+GCal.configure({ clientId: CFG.googleClientId, onAuthChange: () => renderGBar() });
+function gOn() { return !!db.settings.google && GCal.hasConfig() && !location.hash.startsWith('#demo'); }
+if (gOn() && db.gcache) for (const ev of db.gcache) gMap.set(ev.id, ev);
+function gSaveCache() { db.gcache = [...gMap.values()]; save(); }
+function renderGBar() {
+  const b = $('#gbar');
+  if (!gOn()) { b.innerHTML = ''; return; }
+  b.innerHTML = GCal.signedIn()
+    ? `<span class="gok">${gBusy ? '⏳ 読み込み中…' : '✓ Google'}</span>`
+    : `<button class="pill gwarn" id="gReconnect">🔄 Googleと同期する</button>`;
+}
+function gridRange(y, m) {
+  const first = C.epochDay(y, m, 1), w0 = C.fromEpoch(first).w, rows = Math.ceil((w0 + C.daysInMonth(y, m)) / 7);
+  return [first - w0, first - w0 + rows * 7 - 1];
+}
+async function gLoad(force) {
+  if (!gOn() || !GCal.signedIn()) return;
+  const key = view.y + '-' + view.m;
+  if (!force && gLoaded.has(key) && Date.now() - gLoaded.get(key) < 60000) return;
+  gLoaded.set(key, Date.now());
+  const [s, e] = gridRange(view.y, view.m);
+  gBusy++; renderGBar();
+  try {
+    const list = await GCal.list(s, e);
+    const sk = C.keyOf(s), ek = C.keyOf(e);
+    for (const [id, ev] of gMap) if (ev.date >= sk && ev.date <= ek) gMap.delete(id);
+    for (const ev of list) gMap.set(ev.id, ev);
+    gSaveCache(); render(true);
+  } catch (err) { gLoaded.delete(key); gError(err); }
+  finally { gBusy--; renderGBar(); }
+}
+function gError(err) {
+  console.error(err);
+  if (err && err.code === 'auth') toast('Googleとの接続が切れました。右上の「Googleと同期する」を押してください');
+  else toast('Googleカレンダーとの通信に失敗しました。インターネット接続を確認してください');
+}
+function allEvents() { return gOn() ? [...gMap.values()] : db.events; }
+async function storeAdd(ev) {
+  if (!gOn()) { ev.id = uid(); db.events.push(ev); save(); return ev; }
+  const g = await GCal.insert(ev); gMap.set(g.id, g); gSaveCache(); return g;
+}
+async function storeUpdate(ev, before) {
+  if (!gOn()) { Object.assign(before, ev); save(); return before; }
+  const g = await GCal.update({ ...ev }, before); gMap.set(g.id, g); gSaveCache(); return g;
+}
+async function storeRemove(ev) {
+  if (!gOn()) { db.events = db.events.filter(x => x.id !== ev.id); save(); return; }
+  await GCal.remove(ev.id); gMap.delete(ev.id); gSaveCache();
+}
+
+function eventsOn(e) {
+  const k = C.keyOf(e);
+  return allEvents().filter(ev => ev.date <= k && k <= (ev.endDate || ev.date))
+    .sort((a, b) => (a.allDay === b.allDay ? (a.start || '').localeCompare(b.start || '') : a.allDay ? -1 : 1));
+}
+function stampHTML(st) {
+  if (!st) return '';
+  if (st.startsWith('img:')) {
+    const im = db.images.find(i => i.id === st.slice(4));
+    return im ? `<img src="${im.data}" alt="">` : '';
+  }
+  return esc(st);
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function dateLabel(e) { const o = C.fromEpoch(e); return `${o.m}月${o.d}日(${C.WD[o.w]})`; }
+function timeLabel(ev) {
+  const multi = ev.endDate && ev.endDate !== ev.date ? `（〜${+ev.endDate.slice(5, 7)}/${+ev.endDate.slice(8)}）` : '';
+  return (ev.allDay ? '終日' : ev.start + (ev.end ? '〜' + ev.end : '')) + multi + (ev.recurring ? ' 🔁' : '');
+}
+
+// ---------- 描画 ----------
+function render(noLoad) {
+  if (!noLoad) gLoad();
+  renderGBar();
+  $('#title').textContent = `${view.y}年${view.m}月`;
+  const first = C.epochDay(view.y, view.m, 1);
+  const w0 = C.fromEpoch(first).w;
+  const dim = C.daysInMonth(view.y, view.m);
+  const rows = Math.ceil((w0 + dim) / 7);
+  const start = first - w0, today = C.todayEpoch();
+  let html = '';
+  for (let i = 0; i < rows * 7; i++) {
+    const e = start + i, o = C.fromEpoch(e), hol = C.holidayName(e);
+    const cls = ['cell'];
+    if (o.m !== view.m) cls.push('other');
+    if (e === today) cls.push('today');
+    if (e === selected) cls.push('sel');
+    if (o.w === 0) cls.push('sun'); else if (o.w === 6) cls.push('sat');
+    if (hol) cls.push('hol');
+    const evs = eventsOn(e);
+    const stamps = evs.filter(v => v.stamp).slice(0, 3).map(v => stampHTML(v.stamp)).join('');
+    const roku = db.settings.rokuyo ? C.rokuyo(e) : '';
+    const max = 3;
+    const evHtml = evs.slice(0, max).map(v =>
+      `<div class="ev" style="--c:${v.color}">${v.allDay ? '' : `<span class="t">${v.start} </span>`}${esc(v.title)}${v.location ? '<span class="pin">📍</span>' : ''}</div>`).join('')
+      + (evs.length > max ? `<div class="more">ほか${evs.length - max}件</div>` : '');
+    html += `<div class="${cls.join(' ')}" data-e="${e}">
+      <div class="top"><span class="num">${o.d}</span>${roku ? `<span class="roku${roku === '大安' ? ' taian' : ''}">${roku}</span>` : ''}</div>
+      ${hol ? `<div class="hname">${hol}</div>` : ''}
+      ${stamps ? `<div class="stamps">${stamps}</div>` : ''}${evHtml}</div>`;
+  }
+  $('#grid').innerHTML = html;
+  renderSide();
+  renderTemplates();
+}
+function renderSide() {
+  const evs = eventsOn(selected), hol = C.holidayName(selected);
+  $('#side').innerHTML = `<h2>${dateLabel(selected)}</h2>
+    <div class="meta">${db.settings.rokuyo ? C.rokuyo(selected) : ''} ${hol ? `<span class="h">${hol}</span>` : ''}</div>
+    ${evs.length ? evs.map(v => `<div class="itemwrap"><div class="item" style="--c:${v.color}" data-id="${v.id}">
+        <div class="st">${stampHTML(v.stamp)}</div>
+        <div><div class="tm">${timeLabel(v)}</div><div class="tt">${esc(v.title)}</div>
+          ${v.location ? `<button type="button" class="loc" data-map="${v.id}">📍 ${esc(v.location)}　<u>${openMaps.has(v.id) ? '地図を閉じる' : '地図を見る'}</u></button>` : ''}
+          ${v.memo ? `<div class="memo">${esc(v.memo)}</div>` : ''}</div>
+      </div>${v.location && openMaps.has(v.id) ? mapHTML(v.location) : ''}</div>`).join('') : '<div class="none">予定はありません</div>'}
+    <button class="addbtn" id="sideAdd">＋ この日に予定を追加</button>`;
+}
+// Googleマップ（APIキー不要の埋め込み）
+const openMaps = new Set();
+function mapHTML(place) {
+  const q = encodeURIComponent(place);
+  return `<div class="mapbox"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+      src="https://www.google.com/maps?q=${q}&hl=ja&z=16&output=embed"></iframe>
+    <a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">Googleマップで開く（道順もここから）↗</a></div>`;
+}
+function renderTemplates() {
+  $('#tpls').innerHTML = `<span class="label">${dateLabel(selected)}にワンタップで追加：</span>` +
+    db.templates.map((t, i) => `<button class="tpl" style="--c:${t.color}" data-i="${i}">${stampHTML(t.stamp)} ${esc(t.title)}</button>`).join('');
+}
+
+// ---------- 操作 ----------
+function select(e, flash) {
+  selected = e;
+  const o = C.fromEpoch(e);
+  if (o.y !== view.y || o.m !== view.m) view = { y: o.y, m: o.m };
+  render();
+  if (flash) { const c = document.querySelector(`.cell[data-e="${e}"]`); if (c) c.classList.add('flash'); }
+}
+function moveMonth(d) {
+  let m = view.m + d, y = view.y;
+  if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+  view = { y, m };
+  const dim = C.daysInMonth(y, m), so = C.fromEpoch(selected);
+  selected = C.epochDay(y, m, Math.min(so.d, dim));
+  render();
+}
+async function addEvent(ev) {
+  try { ev = await storeAdd(ev); } catch (err) { gError(err); return false; }
+  select(C.epochOfKey(ev.date), true);
+  toast(`${dateLabel(C.epochOfKey(ev.date))}に「${ev.title}」を追加しました`, async () => {
+    try { await storeRemove(ev); } catch (err) { gError(err); } render(true);
+  });
+  return true;
+}
+
+let toastTimer;
+function toast(msg, undo) {
+  $('#toastMsg').textContent = msg;
+  $('#toastUndo').style.display = undo ? '' : 'none';
+  $('#toastUndo').onclick = () => { undo(); $('#toast').classList.remove('show'); };
+  $('#toast').classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 5000);
+}
+
+// 文章入力
+function parsed() {
+  const text = $('#quick').value.trim();
+  if (!text) return null;
+  const r = C.parseText(text);
+  return { ...r, date: r.date ?? selected };
+}
+function updatePreview() {
+  const r = parsed(), p = $('#preview');
+  if (!r) {
+    p.className = 'empty';
+    p.textContent = '「明日15時 歯医者」「来週金曜 夜7時 飲み会 @渋谷」「25日 家賃」のように打つだけで登録できます（@のあとに場所）';
+    return;
+  }
+  p.className = '';
+  const st = C.autoStamp(r.title);
+  p.textContent = `→ ${dateLabel(r.date)}　${r.start ? r.start + (r.end ? '〜' + r.end : '') : '終日'}　${st} ${r.title || '（名前なし）'}${r.location ? '　📍' + r.location : ''}`;
+}
+async function quickAdd() {
+  const r = parsed();
+  if (!r) { $('#quick').focus(); return; }
+  if (!r.title) { toast('予定の名前も入れてください'); return; }
+  $('#quickAdd').disabled = true;
+  const ok = await addEvent({ title: r.title, date: C.keyOf(r.date), allDay: !r.start, start: r.start || '', end: r.end || '',
+    color: COLORS[0], stamp: C.autoStamp(r.title), memo: '', location: r.location || '' });
+  $('#quickAdd').disabled = false;
+  if (ok) { $('#quick').value = ''; updatePreview(); }
+}
+
+// ---------- 編集ダイアログ ----------
+let editing = null, fColor, fStamp;
+function openEdit(ev) {
+  editing = ev;
+  $('#editTitle').textContent = ev ? '予定を変更' : '予定を追加';
+  $('#fTitle').value = ev ? ev.title : '';
+  $('#fDate').value = ev ? ev.date : C.keyOf(selected);
+  $('#fAllDay').checked = ev ? ev.allDay : false;
+  $('#fStart').value = ev ? ev.start : '10:00';
+  $('#fEnd').value = ev ? ev.end : '';
+  $('#fMemo').value = ev ? ev.memo || '' : '';
+  $('#fLoc').value = ev ? ev.location || '' : '';
+  $('#fMap').innerHTML = '';
+  fColor = ev ? ev.color : COLORS[0];
+  fStamp = ev ? ev.stamp || '' : '';
+  $('#fDelete').style.display = ev ? '' : 'none';
+  $('#fNote').textContent = !ev ? '' : ev.recurring ? '🔁 繰り返しの予定です。変更や削除は、この日の分だけに反映されます。'
+    : ev.endDate && ev.endDate !== ev.date ? '複数日の予定です。日付を変えると、終わりの日も一緒にずれます。' : '';
+  drawColors(); drawStamps(); syncTime();
+  $('#editDlg').showModal();
+  if (!ev) $('#fTitle').focus();
+}
+function syncTime() { $('#timeRow').style.display = $('#fAllDay').checked ? 'none' : ''; }
+function drawColors() {
+  $('#fColors').innerHTML = COLORS.map(c => `<button type="button" style="--c:${c}" data-c="${c}" class="${c === fColor ? 'on' : ''}"></button>`).join('');
+}
+function drawStamps() {
+  const b = (v, inner) => `<button type="button" data-s="${esc(v)}" class="${v === fStamp ? 'on' : ''}">${inner}</button>`;
+  $('#fStamps').innerHTML = b('', '<span class="txt">なし</span>')
+    + db.images.map(im => b('img:' + im.id, `<img src="${im.data}" alt="">`)).join('')
+    + EMOJIS.map(e => b(e, e)).join('')
+    + `<button type="button" id="fImgAdd"><span class="txt">画像<br>追加</span></button>`;
+}
+$('#fColors').onclick = e => { const c = e.target.dataset.c; if (c) { fColor = c; drawColors(); } };
+$('#fStamps').onclick = e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  if (btn.id === 'fImgAdd') { $('#fImage').click(); return; }
+  fStamp = btn.dataset.s; drawStamps();
+};
+$('#fTitle').addEventListener('input', () => {
+  if (!editing && !fStamp) { const s = C.autoStamp($('#fTitle').value); if (s) { fStamp = s; drawStamps(); } }
+});
+$('#fImage').onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  const data = await shrinkImage(file, 160);
+  const id = uid();
+  db.images.push({ id, data }); save();
+  fStamp = 'img:' + id; drawStamps();
+  e.target.value = '';
+};
+function shrinkImage(file, size) {
+  return new Promise((ok, ng) => {
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas'); cv.width = cv.height = size;
+      const s = Math.min(img.width, img.height);
+      cv.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+      URL.revokeObjectURL(img.src);
+      ok(cv.toDataURL('image/png'));
+    };
+    img.onerror = ng;
+    img.src = URL.createObjectURL(file);
+  });
+}
+$('#fAllDay').onchange = syncTime;
+$('#fMapBtn').onclick = () => {
+  const v = $('#fLoc').value.trim();
+  $('#fMap').innerHTML = v ? mapHTML(v) : '';
+  if (!v) $('#fLoc').focus();
+};
+$('#fLoc').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('#fMapBtn').click(); } });
+$('#fCancel').onclick = () => $('#editDlg').close();
+$('#fDelete').onclick = async () => {
+  if (!editing) return;
+  const old = editing;
+  $('#fDelete').disabled = true;
+  try { await storeRemove(old); } catch (err) { gError(err); return; } finally { $('#fDelete').disabled = false; }
+  $('#editDlg').close(); render(true);
+  toast(`「${old.title}」を削除しました`, async () => {
+    const { id, recurring, google, ...rest } = old;
+    try { await storeAdd(rest); } catch (err) { gError(err); } render(true);
+  });
+};
+$('#editForm').onsubmit = async e => {
+  e.preventDefault();
+  const data = {
+    title: $('#fTitle').value.trim(), date: $('#fDate').value, allDay: $('#fAllDay').checked,
+    start: $('#fStart').value, end: $('#fEnd').value, color: fColor, stamp: fStamp, memo: $('#fMemo').value.trim(), location: $('#fLoc').value.trim()
+  };
+  if (!data.allDay && !data.start) data.allDay = true;
+  $('#fSave').disabled = true;
+  try {
+    const saved = editing ? await storeUpdate({ ...editing, ...data }, editing) : await storeAdd(data);
+    $('#editDlg').close();
+    select(C.epochOfKey(saved.date), true);
+  } catch (err) { gError(err); }
+  finally { $('#fSave').disabled = false; }
+};
+
+// ---------- 設定ダイアログ ----------
+function drawTplSettings() {
+  $('#sTpls').innerHTML = db.templates.map((t, i) => `<div class="tplrow" data-i="${i}">
+    <input type="text" data-k="stamp" value="${esc(t.stamp.startsWith('img:') ? '' : t.stamp)}" maxlength="4">
+    <input type="text" data-k="title" value="${esc(t.title)}">
+    <input type="time" data-k="start" value="${t.start}">
+    <input type="time" data-k="end" value="${t.end}">
+    <button type="button" class="x" title="削除">✕</button></div>`).join('');
+}
+$('#sTpls').addEventListener('input', e => {
+  const row = e.target.closest('.tplrow'); if (!row) return;
+  db.templates[row.dataset.i][e.target.dataset.k] = e.target.value; save(); renderTemplates();
+});
+$('#sTpls').addEventListener('click', e => {
+  if (!e.target.classList.contains('x')) return;
+  db.templates.splice(e.target.closest('.tplrow').dataset.i, 1); save(); drawTplSettings(); renderTemplates();
+});
+$('#sTplAdd').onclick = () => {
+  db.templates.push({ stamp: '⭐', title: '新しい予定', start: '', end: '', color: COLORS[db.templates.length % COLORS.length] });
+  save(); drawTplSettings(); renderTemplates();
+};
+$('#sRoku').onchange = e => { db.settings.rokuyo = e.target.checked; save(); render(); };
+$('#settingsBtn').onclick = () => { $('#sRoku').checked = db.settings.rokuyo; drawTplSettings(); drawGSettings(); $('#setDlg').showModal(); };
+function drawGSettings() {
+  const st = $('#gStatus'), con = $('#gConnectBtn'), dis = $('#gDisconnectBtn'), mig = $('#gMigrate');
+  con.style.display = dis.style.display = mig.style.display = 'none';
+  if (!GCal.hasConfig()) { st.textContent = '準備中です（Google側の設定がまだ終わっていません）'; return; }
+  if (location.protocol === 'file:') { st.textContent = 'この開き方ではGoogleとつなげません。フォルダの「カレンダーを開く.bat」から開いてください。'; return; }
+  if (gOn()) {
+    st.textContent = GCal.signedIn() ? '✓ つながっています。予定はGoogleカレンダーに保存されます。' : '一時的に接続が切れています。「Googleカレンダーとつなぐ」を押すと戻ります。';
+    dis.style.display = '';
+    if (!GCal.signedIn()) con.style.display = '';
+    if (db.events.length && GCal.signedIn()) { mig.style.display = ''; mig.textContent = `このパソコンだけにある予定（${db.events.length}件）をGoogleに移す`; }
+  } else {
+    st.textContent = 'まだつながっていません。つなぐと、Googleカレンダーの予定がここに表示され、ここで入れた予定もGoogleに保存されます。';
+    con.style.display = '';
+  }
+}
+async function gConnectFlow(first) {
+  try {
+    await GCal.connect(first);
+    if (!db.settings.google) { db.settings.google = true; gMap.clear(); save(); toast('Googleカレンダーとつながりました'); }
+    gLoaded.clear(); render(); gLoad(true);
+  } catch (err) {
+    console.error(err);
+    toast(err.message === 'not_ready' ? 'Googleの準備中です。少し待ってからもう一度押してください' : 'Googleにつなげませんでした。もう一度試してください');
+  }
+  if ($('#setDlg').open) drawGSettings();
+}
+window.onGisLoad = () => renderGBar();
+$('#gConnectBtn').onclick = () => gConnectFlow(!db.settings.google);
+$('#gDisconnectBtn').onclick = () => {
+  if (!confirm('Googleカレンダーとのつながりを切ります。（Googleカレンダーの予定は消えません）')) return;
+  GCal.disconnect(); db.settings.google = false; db.gcache = []; gMap.clear(); save(); drawGSettings(); render();
+};
+$('#gMigrate').onclick = async () => {
+  if (!confirm(`このパソコンだけにある予定 ${db.events.length}件 をGoogleカレンダーに移します。よろしいですか？`)) return;
+  $('#gMigrate').disabled = true;
+  let n = 0;
+  try {
+    for (const ev of [...db.events]) {
+      const { id, ...rest } = ev;
+      await storeAdd(rest);
+      (db.localBackup = db.localBackup || []).push(ev);
+      db.events = db.events.filter(x => x !== ev); save(); n++;
+    }
+    toast(`${n}件をGoogleカレンダーに移しました`);
+  } catch (err) { gError(err); }
+  $('#gMigrate').disabled = false; drawGSettings(); render(true);
+};
+$('#gbar').onclick = e => { if (e.target.closest('#gReconnect')) gConnectFlow(false); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) gLoad(true); });
+$('#sClose').onclick = () => $('#setDlg').close();
+$('#sExport').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(db, null, 1)], { type: 'application/json' }));
+  a.download = `カレンダー_${C.keyOf(C.todayEpoch())}.json`; a.click();
+};
+$('#sImport').onclick = () => $('#sImportFile').click();
+$('#sImportFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (!d.events) throw 0;
+    if (!confirm('今の予定を、ファイルの内容で置き換えます。よろしいですか？')) return;
+    db = d; save(); render(); toast('読み込みました');
+  } catch (err) { alert('このファイルは読み込めませんでした'); }
+  e.target.value = '';
+};
+
+// ---------- イベント登録 ----------
+$('#prev').onclick = () => moveMonth(-1);
+$('#next').onclick = () => moveMonth(1);
+$('#todayBtn').onclick = () => select(C.todayEpoch());
+$('#grid').onclick = e => {
+  const c = e.target.closest('.cell'); if (!c) return;
+  const d = +c.dataset.e;
+  if (d === selected && window.matchMedia('(max-width: 900px)').matches) { $('#side').scrollIntoView({ behavior: 'smooth' }); return; }
+  select(d);
+};
+$('#grid').ondblclick = e => { const c = e.target.closest('.cell'); if (c) { select(+c.dataset.e); openEdit(null); } };
+$('#side').onclick = e => {
+  if (e.target.closest('#sideAdd')) { openEdit(null); return; }
+  const mb = e.target.closest('[data-map]');
+  if (mb) { const id = mb.dataset.map; openMaps.has(id) ? openMaps.delete(id) : openMaps.add(id); renderSide(); return; }
+  if (e.target.closest('.mapbox')) return;
+  const it = e.target.closest('.item'); if (it) openEdit(db.events.find(x => x.id === it.dataset.id));
+};
+$('#tpls').onclick = e => {
+  const b = e.target.closest('.tpl'); if (!b) return;
+  const t = db.templates[b.dataset.i];
+  addEvent({ title: t.title, date: C.keyOf(selected), allDay: !t.start, start: t.start || '', end: t.end || '',
+    color: t.color, stamp: t.stamp, memo: '' });
+};
+$('#quick').addEventListener('input', updatePreview);
+$('#quick').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) quickAdd(); });
+$('#quickAdd').onclick = quickAdd;
+// スマホ：左右スワイプで月移動
+let tx = null, ty = null;
+$('#cal').addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
+$('#cal').addEventListener('touchend', e => {
+  if (tx === null) return;
+  const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty;
+  if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) moveMonth(dx < 0 ? 1 : -1);
+  tx = null;
+});
+// PC：キーボードの←→で月移動
+document.addEventListener('keydown', e => {
+  if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.querySelector('dialog[open]')) return;
+  if (e.key === 'ArrowLeft') moveMonth(-1);
+  if (e.key === 'ArrowRight') moveMonth(1);
+});
+
+render(); updatePreview();
+if (location.hash === '#demomap') { openMaps.add('c'); renderSide(); }
+</script>
+</body>
+</html>

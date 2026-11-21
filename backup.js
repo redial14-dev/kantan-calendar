@@ -16,6 +16,10 @@ try {
   } else {
     console.log('前回から変更はありません。');
   }
+  try {
+    execSync('git push -q origin main', { cwd: here, stdio: 'ignore' });
+    console.log('GitHubにも保存しました（スマホ用ページも数分で更新されます）。');
+  } catch (e) { console.log('GitHubへの保存はできませんでした（インターネット接続を確認してください）。'); }
   fs.rmSync(dest, { recursive: true, force: true });
   fs.cpSync(here, dest, { recursive: true });
   console.log('バックアップしました： ' + dest);

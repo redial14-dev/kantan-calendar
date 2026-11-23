@@ -150,6 +150,17 @@
   #fNote { font-size: 14px; color: #c25e00; background: #fff4e5; border-radius: 8px; padding: 8px 10px; }
   #fNote:empty { display: none; }
   button:disabled { opacity: .5; }
+  /* 家族で共有 */
+  .share { display: flex; gap: 8px; flex-wrap: wrap; }
+  .share button { flex: 1; min-width: 120px; padding: 10px; font-size: 16px; border-radius: 10px; border: 2px solid var(--line); background: #fff; }
+  .share button.on { border-color: var(--accent); background: #e6f4ee; font-weight: bold; }
+  .share:empty { display: none; }
+  .fam { font-size: 11px; }
+  .item .by { color: var(--sub); font-size: 13px; }
+  .famrow { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #d6eadf; font-size: 15px; word-break: break-all; }
+  .famrow .x { border: 0; background: none; font-size: 18px; color: var(--sun); flex: none; }
+  .qshare { flex: none; padding: 0 12px; border-radius: 10px; border: 2px solid var(--line); background: #fff; font-size: 15px; }
+  .qshare.family { border-color: var(--accent); background: #e6f4ee; }
 </style>
 </head>
 <body>
@@ -167,6 +178,7 @@
   <section class="inputbox">
     <div class="inputrow">
       <input id="quick" type="text" placeholder="例：明日15時 歯医者" autocomplete="off" enterkeyhint="done">
+      <button id="qShare" class="qshare" type="button" style="display:none" title="押すと「自分だけ」と「家族全員」が切り替わります"></button>
       <button id="quickAdd">追加</button>
     </div>
     <div id="preview" class="empty"></div>
@@ -187,6 +199,7 @@
     <h3 id="editTitle">予定</h3>
     <div id="fNote"></div>
     <label>予定の名前<input type="text" id="fTitle" required></label>
+    <div id="fShareBox"><div class="hint" style="margin-bottom:6px">だれに見せる？</div><div class="share" id="fShare"></div></div>
     <div class="row">
       <label>日付<input type="date" id="fDate" required></label>
       <label class="check"><input type="checkbox" id="fAllDay"> 終日</label>
@@ -226,6 +239,11 @@
         <button type="button" class="pill" id="gDisconnectBtn" style="flex:none">つなぐのをやめる</button>
       </div>
       <button type="button" class="pill" id="gMigrate" style="justify-self:start"></button>
+    </div>
+    <div class="gsect" id="famSect">
+      <div style="font-weight:bold">👨‍👩‍👧 家族で共有</div>
+      <div class="st" id="famStatus"></div>
+      <div id="famBody" style="display:grid;gap:8px"></div>
     </div>
     <label class="check"><input type="checkbox" id="sRoku"> 六曜（大安・仏滅など）を表示する</label>
     <div>
@@ -301,6 +319,15 @@ const gLoaded = new Map();   // 'y-m' → 読み込んだ時刻
 let gBusy = 0;
 GCal.configure({ clientId: CFG.googleClientId, onAuthChange: () => renderGBar() });
 function gOn() { return !!db.settings.google && GCal.hasConfig() && !location.hash.startsWith('#demo'); }
+// 家族用カレンダー： db.settings.family = { id, owner, name }
+const fam = () => db.settings.family || null;
+GCal.setFamily(fam() && fam().id);
+if (db.settings.showFamily === undefined) db.settings.showFamily = true;
+// 招待リンク（…?family=ID）で開いたとき：Googleとつないだあとで参加する
+{
+  const q = new URLSearchParams(location.search), j = q.get('family');
+  if (j) { db.settings.joinFamily = j; save(); history.replaceState(null, '', location.pathname + location.hash); }
+}
 if (gOn() && db.gcache) for (const ev of db.gcache) gMap.set(ev.id, ev);
 function gSaveCache() { db.gcache = [...gMap.values()]; save(); }
 function renderGBar() {
@@ -335,18 +362,24 @@ function gError(err) {
   if (err && err.code === 'auth') toast('Googleとの接続が切れました。右上の「Googleと同期する」を押してください');
   else toast('Googleカレンダーとの通信に失敗しました。インターネット接続を確認してください');
 }
-function allEvents() { return gOn() ? [...gMap.values()] : db.events; }
+function allEvents() {
+  if (!gOn()) return db.events;
+  const all = [...gMap.values()];
+  return db.settings.showFamily ? all : all.filter(ev => ev.share !== 'family');
+}
 async function storeAdd(ev) {
   if (!gOn()) { ev.id = uid(); db.events.push(ev); save(); return ev; }
   const g = await GCal.insert(ev); gMap.set(g.id, g); gSaveCache(); return g;
 }
 async function storeUpdate(ev, before) {
   if (!gOn()) { Object.assign(before, ev); save(); return before; }
-  const g = await GCal.update({ ...ev }, before); gMap.set(g.id, g); gSaveCache(); return g;
+  const g = await GCal.update({ ...ev }, before);
+  if (g.id !== before.id) gMap.delete(before.id);   // 自分だけ⇔家族全員を変えた
+  gMap.set(g.id, g); gSaveCache(); return g;
 }
 async function storeRemove(ev) {
   if (!gOn()) { db.events = db.events.filter(x => x.id !== ev.id); save(); return; }
-  await GCal.remove(ev.id); gMap.delete(ev.id); gSaveCache();
+  await GCal.remove(ev); gMap.delete(ev.id); gSaveCache();
 }
 
 function eventsOn(e) {
@@ -393,7 +426,7 @@ function render(noLoad) {
     const roku = db.settings.rokuyo ? C.rokuyo(e) : '';
     const max = 3;
     const evHtml = evs.slice(0, max).map(v =>
-      `<div class="ev" style="--c:${v.color}">${v.allDay ? '' : `<span class="t">${v.start} </span>`}${esc(v.title)}${v.location ? '<span class="pin">📍</span>' : ''}</div>`).join('')
+      `<div class="ev" style="--c:${v.color}">${v.share === 'family' ? '<span class="fam">👨‍👩‍👧</span>' : ''}${v.allDay ? '' : `<span class="t">${v.start} </span>`}${esc(v.title)}${v.location ? '<span class="pin">📍</span>' : ''}</div>`).join('')
       + (evs.length > max ? `<div class="more">ほか${evs.length - max}件</div>` : '');
     html += `<div class="${cls.join(' ')}" data-e="${e}">
       <div class="top"><span class="num">${o.d}</span>${roku ? `<span class="roku${roku === '大安' ? ' taian' : ''}">${roku}</span>` : ''}</div>
@@ -410,7 +443,8 @@ function renderSide() {
     <div class="meta">${db.settings.rokuyo ? C.rokuyo(selected) : ''} ${hol ? `<span class="h">${hol}</span>` : ''}</div>
     ${evs.length ? evs.map(v => `<div class="itemwrap"><div class="item" style="--c:${v.color}" data-id="${v.id}">
         <div class="st">${stampHTML(v.stamp)}</div>
-        <div><div class="tm">${timeLabel(v)}</div><div class="tt">${esc(v.title)}</div>
+        <div><div class="tm">${timeLabel(v)}${v.share === 'family' ? '　👨‍👩‍👧 家族' : ''}</div><div class="tt">${esc(v.title)}</div>
+          ${v.by ? `<div class="by">入れた人：${esc(v.by)}</div>` : ''}
           ${v.location ? `<button type="button" class="loc" data-map="${v.id}">📍 ${esc(v.location)}　<u>${openMaps.has(v.id) ? '地図を閉じる' : '地図を見る'}</u></button>` : ''}
           ${v.memo ? `<div class="memo">${esc(v.memo)}</div>` : ''}</div>
       </div>${v.location && openMaps.has(v.id) ? mapHTML(v.location) : ''}</div>`).join('') : '<div class="none">予定はありません</div>'}
@@ -424,7 +458,17 @@ function mapHTML(place) {
       src="https://www.google.com/maps?q=${q}&hl=ja&z=16&output=embed"></iframe>
     <a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">Googleマップで開く（道順もここから）↗</a></div>`;
 }
+function famReady() { return gOn() && !!fam(); }
+function quickShare() { return famReady() && db.settings.quickShare === 'family' ? 'family' : 'me'; }
+function renderQShare() {
+  const b = $('#qShare');
+  b.style.display = famReady() ? '' : 'none';
+  const f = quickShare() === 'family';
+  b.className = 'qshare' + (f ? ' family' : '');
+  b.textContent = f ? '👨‍👩‍👧 家族' : '🔒 自分';
+}
 function renderTemplates() {
+  renderQShare();
   $('#tpls').innerHTML = `<span class="label">${dateLabel(selected)}にワンタップで追加：</span>` +
     db.templates.map((t, i) => `<button class="tpl" style="--c:${t.color}" data-i="${i}">${stampHTML(t.stamp)} ${esc(t.title)}</button>`).join('');
 }
@@ -488,13 +532,13 @@ async function quickAdd() {
   if (!r.title) { toast('予定の名前も入れてください'); return; }
   $('#quickAdd').disabled = true;
   const ok = await addEvent({ title: r.title, date: C.keyOf(r.date), allDay: !r.start, start: r.start || '', end: r.end || '',
-    color: COLORS[0], stamp: C.autoStamp(r.title), memo: '', location: r.location || '' });
+    color: COLORS[0], stamp: C.autoStamp(r.title), memo: '', location: r.location || '', share: quickShare() });
   $('#quickAdd').disabled = false;
   if (ok) { $('#quick').value = ''; updatePreview(); }
 }
 
 // ---------- 編集ダイアログ ----------
-let editing = null, fColor, fStamp;
+let editing = null, fColor, fStamp, fShare;
 function openEdit(ev) {
   editing = ev;
   $('#editTitle').textContent = ev ? '予定を変更' : '予定を追加';
@@ -508,13 +552,23 @@ function openEdit(ev) {
   $('#fMap').innerHTML = '';
   fColor = ev ? ev.color : COLORS[0];
   fStamp = ev ? ev.stamp || '' : '';
+  fShare = ev ? ev.share || 'me' : quickShare();
   $('#fDelete').style.display = ev ? '' : 'none';
   $('#fNote').textContent = !ev ? '' : ev.recurring ? '🔁 繰り返しの予定です。変更や削除は、この日の分だけに反映されます。'
     : ev.endDate && ev.endDate !== ev.date ? '複数日の予定です。日付を変えると、終わりの日も一緒にずれます。' : '';
-  drawColors(); drawStamps(); syncTime();
+  drawColors(); drawStamps(); drawShare(); syncTime();
   $('#editDlg').showModal();
   if (!ev) $('#fTitle').focus();
 }
+function drawShare() {
+  const box = $('#fShareBox');
+  box.style.display = famReady() ? '' : 'none';
+  // 繰り返しの予定は、Googleの決まりで「自分だけ⇔家族」を引っ越せない
+  const lock = editing && editing.recurring;
+  const b = (v, txt) => `<button type="button" data-v="${v}" class="${v === fShare ? 'on' : ''}"${lock && v !== fShare ? ' disabled' : ''}>${txt}</button>`;
+  $('#fShare').innerHTML = b('me', '🔒 自分だけ') + b('family', '👨‍👩‍👧 家族全員');
+}
+$('#fShare').onclick = e => { const v = e.target.closest('button') && e.target.closest('button').dataset.v; if (v) { fShare = v; drawShare(); } };
 function syncTime() { $('#timeRow').style.display = $('#fAllDay').checked ? 'none' : ''; }
 function drawColors() {
   $('#fColors').innerHTML = COLORS.map(c => `<button type="button" style="--c:${c}" data-c="${c}" class="${c === fColor ? 'on' : ''}"></button>`).join('');
@@ -572,7 +626,7 @@ $('#fDelete').onclick = async () => {
   try { await storeRemove(old); } catch (err) { gError(err); return; } finally { $('#fDelete').disabled = false; }
   $('#editDlg').close(); render(true);
   toast(`「${old.title}」を削除しました`, async () => {
-    const { id, recurring, google, ...rest } = old;
+    const { id, gid, cal, by, recurring, google, ...rest } = old;
     try { await storeAdd(rest); } catch (err) { gError(err); } render(true);
   });
 };
@@ -580,7 +634,8 @@ $('#editForm').onsubmit = async e => {
   e.preventDefault();
   const data = {
     title: $('#fTitle').value.trim(), date: $('#fDate').value, allDay: $('#fAllDay').checked,
-    start: $('#fStart').value, end: $('#fEnd').value, color: fColor, stamp: fStamp, memo: $('#fMemo').value.trim(), location: $('#fLoc').value.trim()
+    start: $('#fStart').value, end: $('#fEnd').value, color: fColor, stamp: fStamp, memo: $('#fMemo').value.trim(), location: $('#fLoc').value.trim(),
+    share: famReady() ? fShare : 'me'
   };
   if (!data.allDay && !data.start) data.allDay = true;
   $('#fSave').disabled = true;
@@ -614,7 +669,7 @@ $('#sTplAdd').onclick = () => {
   save(); drawTplSettings(); renderTemplates();
 };
 $('#sRoku').onchange = e => { db.settings.rokuyo = e.target.checked; save(); render(); };
-$('#settingsBtn').onclick = () => { $('#sRoku').checked = db.settings.rokuyo; drawTplSettings(); drawGSettings(); $('#setDlg').showModal(); };
+$('#settingsBtn').onclick = () => { $('#sRoku').checked = db.settings.rokuyo; drawTplSettings(); drawGSettings(); drawFamSettings(); $('#setDlg').showModal(); };
 function drawGSettings() {
   const st = $('#gStatus'), con = $('#gConnectBtn'), dis = $('#gDisconnectBtn'), mig = $('#gMigrate');
   con.style.display = dis.style.display = mig.style.display = 'none';
@@ -634,6 +689,7 @@ async function gConnectFlow(first) {
   try {
     await GCal.connect(first);
     if (!db.settings.google) { db.settings.google = true; gMap.clear(); save(); toast('Googleカレンダーとつながりました'); }
+    await famAfterConnect();
     gLoaded.clear(); render(); gLoad(true);
   } catch (err) {
     console.error(err);
@@ -641,11 +697,92 @@ async function gConnectFlow(first) {
   }
   if ($('#setDlg').open) drawGSettings();
 }
+function setFam(f) {
+  db.settings.family = f; GCal.setFamily(f && f.id); save();
+  gMap.clear(); gLoaded.clear();
+}
+async function famAfterConnect() {
+  try {
+    const j = db.settings.joinFamily;
+    if (j) {
+      delete db.settings.joinFamily; save();
+      try { setFam(await GCal.joinFamily(j)); toast('家族のカレンダーに参加しました'); }
+      catch (err) {
+        console.error(err);
+        alert('家族のカレンダーに参加できませんでした。\n家族用カレンダーを作った人に「このGmailを家族に追加して」と頼んでから、もう一度招待リンクを開いてください。');
+      }
+      return;
+    }
+    if (!fam()) { const f = await GCal.findFamily(); if (f) setFam(f); }
+  } catch (err) { console.error(err); }
+}
+function inviteLink() { return location.origin + location.pathname + '?family=' + encodeURIComponent(fam().id); }
+async function drawFamSettings() {
+  const sect = $('#famSect'), st = $('#famStatus'), body = $('#famBody');
+  sect.style.display = gOn() ? '' : 'none';
+  if (!gOn()) return;
+  if (!GCal.signedIn()) { st.textContent = 'Googleとの接続が切れています。上の「Googleカレンダーとつなぐ」を押してください。'; body.innerHTML = ''; return; }
+  const f = fam();
+  const showChk = `<label class="check"><input type="checkbox" id="famShow"${db.settings.showFamily ? ' checked' : ''}> 家族の予定をカレンダーに表示する</label>`;
+  if (!f) {
+    st.textContent = '家族用のカレンダーを作ると、予定ごとに「自分だけ」か「家族全員」かを選べるようになります。';
+    body.innerHTML = `<button type="button" class="pill" id="famCreate" style="justify-self:start">家族用カレンダーを作る</button>
+      <div class="hint">家族から招待リンクをもらった人は、作らずにそのリンクを開いてください。</div>`;
+    return;
+  }
+  if (!f.owner) {
+    st.textContent = `✓「${f.name}」に参加しています。`;
+    body.innerHTML = showChk + `<button type="button" class="pill" id="famLeave" style="justify-self:start">家族のカレンダーから抜ける</button>`;
+    return;
+  }
+  st.textContent = `✓「${f.name}」を作りました（あなたが管理しています）。`;
+  body.innerHTML = showChk + `<div style="font-weight:bold;margin-top:4px">家族のメンバー</div><div id="famList" class="hint">読み込み中…</div>
+    <div class="row"><input type="text" id="famEmail" placeholder="家族のGmail（例：taro@gmail.com）" inputmode="email" autocomplete="off">
+      <button type="button" class="pill" id="famAdd" style="flex:none">追加</button></div>
+    <button type="button" class="pill" id="famLink" style="justify-self:start">招待リンクをコピー</button>
+    <div class="hint">① 家族のGmailを「追加」→ ② 招待リンクをLINEなどで送る → ③ 家族がリンクを開いて「Googleカレンダーとつなぐ」を押す。<br>
+      ※ 今はテスト中のアプリなので、家族のGmailをGoogleの設定画面の「テストユーザー」にも登録してください。</div>`;
+  try {
+    const list = (await GCal.members(f.id)).filter(m => m.role !== 'owner');
+    $('#famList').innerHTML = list.length ? list.map(m => `<div class="famrow"><span>${esc(m.email)}</span><button type="button" class="x" data-rule="${esc(m.ruleId)}" data-email="${esc(m.email)}" title="外す">✕</button></div>`).join('')
+      : 'まだだれも追加していません';
+  } catch (err) { console.error(err); $('#famList').textContent = 'メンバーを読み込めませんでした'; }
+}
+$('#famBody').addEventListener('change', e => {
+  if (e.target.id === 'famShow') { db.settings.showFamily = e.target.checked; save(); render(true); }
+});
+$('#famBody').addEventListener('click', async e => {
+  const t = e.target;
+  try {
+    if (t.id === 'famCreate') {
+      const name = prompt('家族用カレンダーの名前', '家族の予定'); if (!name) return;
+      t.disabled = true;
+      setFam(await GCal.createFamily(name.trim()));
+      toast('家族用カレンダーを作りました'); render(); drawFamSettings();
+    } else if (t.id === 'famAdd') {
+      const email = $('#famEmail').value.trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('Gmailのアドレスを入れてください'); return; }
+      t.disabled = true;
+      await GCal.addMember(fam().id, email);
+      toast(email + ' を家族に追加しました'); drawFamSettings();
+    } else if (t.dataset.rule) {
+      if (!confirm(t.dataset.email + ' を家族から外します。この人は家族の予定を見られなくなります。')) return;
+      await GCal.removeMember(fam().id, t.dataset.rule); drawFamSettings();
+    } else if (t.id === 'famLink') {
+      const link = inviteLink();
+      try { await navigator.clipboard.writeText(link); toast('招待リンクをコピーしました。LINEなどに貼って家族に送ってください'); }
+      catch (err) { prompt('このリンクを家族に送ってください', link); }
+    } else if (t.id === 'famLeave') {
+      if (!confirm('家族のカレンダーから抜けます。（家族の予定は消えません。また招待リンクを開けば戻れます）')) return;
+      await GCal.leaveFamily(fam().id); setFam(null); render(); drawFamSettings();
+    }
+  } catch (err) { gError(err); t.disabled = false; }
+});
 window.onGisLoad = () => renderGBar();
 $('#gConnectBtn').onclick = () => gConnectFlow(!db.settings.google);
 $('#gDisconnectBtn').onclick = () => {
   if (!confirm('Googleカレンダーとのつながりを切ります。（Googleカレンダーの予定は消えません）')) return;
-  GCal.disconnect(); db.settings.google = false; db.gcache = []; gMap.clear(); save(); drawGSettings(); render();
+  GCal.disconnect(); db.settings.google = false; db.gcache = []; gMap.clear(); setFam(null); save(); drawGSettings(); drawFamSettings(); render();
 };
 $('#gMigrate').onclick = async () => {
   if (!confirm(`このパソコンだけにある予定 ${db.events.length}件 をGoogleカレンダーに移します。よろしいですか？`)) return;
@@ -698,17 +835,20 @@ $('#side').onclick = e => {
   const mb = e.target.closest('[data-map]');
   if (mb) { const id = mb.dataset.map; openMaps.has(id) ? openMaps.delete(id) : openMaps.add(id); renderSide(); return; }
   if (e.target.closest('.mapbox')) return;
-  const it = e.target.closest('.item'); if (it) openEdit(db.events.find(x => x.id === it.dataset.id));
+  const it = e.target.closest('.item'); if (!it) return;
+  const ev = allEvents().find(x => x.id === it.dataset.id);
+  if (ev) openEdit(ev);
 };
 $('#tpls').onclick = e => {
   const b = e.target.closest('.tpl'); if (!b) return;
   const t = db.templates[b.dataset.i];
   addEvent({ title: t.title, date: C.keyOf(selected), allDay: !t.start, start: t.start || '', end: t.end || '',
-    color: t.color, stamp: t.stamp, memo: '' });
+    color: t.color, stamp: t.stamp, memo: '', share: quickShare() });
 };
 $('#quick').addEventListener('input', updatePreview);
 $('#quick').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) quickAdd(); });
 $('#quickAdd').onclick = quickAdd;
+$('#qShare').onclick = () => { db.settings.quickShare = quickShare() === 'family' ? 'me' : 'family'; save(); renderQShare(); };
 // スマホ：左右スワイプで月移動
 let tx = null, ty = null;
 $('#cal').addEventListener('touchstart', e => { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, { passive: true });
